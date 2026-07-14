@@ -1,13 +1,11 @@
-version: '3.8'
-
 services:
   llm-benchmark-ct:
     container_name: llm-benchmark-ct
     build:
       context: .
-      dockerfile: Dockerfile # Assumed Dockerfile exists for the build process
+      dockerfile: Dockerfile
     ports:
-      - "80:80"
+      - "8080:80"
     volumes:
       # Persistent storage for database
       - /opt/ct/llm-benchmark/db:/opt/ct/llm-benchmark/db
