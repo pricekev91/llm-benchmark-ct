@@ -7,9 +7,15 @@ SECRET_API_KEY = os.environ.get("API_KEY", "SUPER_SECRET_DEV_KEY")
 
 # Paths exempt from authentication
 PUBLIC_PATHS = {
+    "/",
     "/health",
     "/favicon.ico",
+}
+
+# Prefixes (checked with startswith)
+PUBLIC_PREFIXES = {
     "/static/",
+    "/static",
 }
 
 def verify_api_key(api_key: str) -> bool:
@@ -23,7 +29,7 @@ def is_public_path(path: str) -> bool:
     """Check if a request path is exempt from authentication."""
     if path in PUBLIC_PATHS:
         return True
-    for prefix in PUBLIC_PATHS:
-        if prefix and prefix != "/health" and path.startswith(prefix):
+    for prefix in PUBLIC_PREFIXES:
+        if path.startswith(prefix):
             return True
     return False
