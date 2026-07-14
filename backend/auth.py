@@ -3,7 +3,7 @@ import os
 from functools import wraps
 
 # Load API key from environment, fall back to dev default
-SECRET_API_KEY = os.environ.get("API_KEY", "SUPER_SECRET_DEV_KEY")
+SECRET_API_KEY = os.environ.get("API_KEY") or "SUPER_SECRET_DEV_KEY"
 
 # Paths exempt from authentication
 PUBLIC_PATHS = {
