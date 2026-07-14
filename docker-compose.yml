@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  llm-benchmark-ct:
+    container_name: llm-benchmark-ct
+    build:
+      context: .
+      dockerfile: Dockerfile # Assumed Dockerfile exists for the build process
+    ports:
+      - "80:80"
+    volumes:
+      # Persistent storage for database
+      - /opt/ct/llm-benchmark/db:/opt/ct/llm-benchmark/db
+      # Persistent storage for endpoint configurations
+      - /opt/ct/llm-benchmark/configs:/opt/ct/llm-benchmark/configs
+    environment:
+      # Placeholder for API Key used in authentication
+      - API_KEY=${API_KEY}
+    restart: unless-stopped
