@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from starlette.status import HTTP_401_UNAUTHORIZED
 from .auth import verify_api_key
 import os
 
@@ -28,7 +30,10 @@ async def authenticate_middleware(request, call_next):
     """Middleware to enforce API key authentication."""
     api_key = request.headers.get("X-API-KEY")
     if not verify_api_key(api_key):
-        return {"error": "Unauthorized", "detail": "Invalid or missing API Key"}
+        return JSONResponse(
+            status_code=HTTP_401_UNAUTHORIZED,
+            content={"error": "Unauthorized", "detail": "Invalid or missing API Key"},
+        )
     return await call_next(request)
 
 # --- Stub Routes ---
