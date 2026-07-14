@@ -1,19 +1,29 @@
 # backend/auth.py
+import os
 from functools import wraps
 
-# In a real application, this key should be loaded securely from environment variables
-# e.g., os.environ.get("API_KEY")
-SECRET_API_KEY = "SUPER_SECRET_DEV_KEY" 
+# Load API key from environment, fall back to dev default
+SECRET_API_KEY = os.environ.get("API_KEY", "SUPER_SECRET_DEV_KEY")
+
+# Paths exempt from authentication
+PUBLIC_PATHS = {
+    "/health",
+    "/favicon.ico",
+    "/static/",
+}
 
 def verify_api_key(api_key: str) -> bool:
     """Verifies the incoming API key against the configured secret key."""
+    if not api_key:
+        return False
     return api_key == SECRET_API_KEY
 
-def require_auth(f):
-    """Decorator to enforce authentication on specific routes."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # This assumes authentication middleware handles the check, but a decorator is good practice for specific endpoint security.
-        # For simplicity in this scaffold, we rely on the FastAPI middleware in main.py.
-        return f(*args, **kwargs)
-    return decorated_function
+
+def is_public_path(path: str) -> bool:
+    """Check if a request path is exempt from authentication."""
+    if path in PUBLIC_PATHS:
+        return True
+    for prefix in PUBLIC_PATHS:
+        if prefix and prefix != "/health" and path.startswith(prefix):
+            return True
+    return False

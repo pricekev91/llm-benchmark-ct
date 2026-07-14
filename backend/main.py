@@ -1,62 +1,82 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+# backend/main.py
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.status import HTTP_401_UNAUTHORIZED
-from .auth import verify_api_key
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from .auth import verify_api_key, is_public_path
+from .db import initialize_database
+
 import os
 
 # Initialize FastAPI application
-app = FastAPI(title="LLM Benchmark API")
+app = FastAPI(title="LLM Benchmark API", version="1.0.0")
 
-# Placeholder for initialization logic (e.g., connecting to DB)
-def initialize_db():
-    print("DB Initialization Stub: Checking SQLite connection...")
-    # db.py will handle actual initialization later
-    pass
-
-# Run DB init upon startup
-initialize_db()
-
+# --- Startup ---
 @app.on_event("startup")
 def startup_event():
-    pass
+    """Initialize database on startup."""
+    initialize_database()
 
+
+# --- Auth Middleware ---
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Allow public paths without auth
+        if is_public_path(path):
+            return await call_next(request)
+
+        api_key = request.headers.get("X-API-KEY")
+        if not verify_api_key(api_key):
+            return JSONResponse(
+                status_code=HTTP_401_UNAUTHORIZED,
+                content={"error": "Unauthorized", "detail": "Invalid or missing API Key"},
+            )
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
+
+
+# --- Health Check (public) ---
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint — no auth required."""
     return {"status": "ok", "service": "llm-benchmark-ct"}
 
-@app.middleware("http")
-async def authenticate_middleware(request, call_next):
-    """Middleware to enforce API key authentication."""
-    api_key = request.headers.get("X-API-KEY")
-    if not verify_api_key(api_key):
-        return JSONResponse(
-            status_code=HTTP_401_UNAUTHORIZED,
-            content={"error": "Unauthorized", "detail": "Invalid or missing API Key"},
-        )
-    return await call_next(request)
 
-# --- Stub Routes ---
+# --- Include Routers (protected by middleware) ---
+from .endpoints import config_router, preset_router, benchmark_router, analytics_router
 
-# Example endpoint for saving configuration
-@app.post("/endpoints/save")
-def save_endpoint():
-    return {"message": "Endpoint saved stubbed", "status": "success"}
+app.include_router(config_router)
+app.include_router(preset_router)
+app.include_router(benchmark_router)
+app.include_router(analytics_router)
 
-# Example endpoint for listing configurations
-@app.get("/endpoints/list")
-def list_endpoints():
-    return {"endpoints": [], "message": "Listing endpoints stubbed"}
 
-# Example endpoint for listing available models
-@app.get("/models/list")
-def list_models():
-    return {"models": ["OpenAI-GPT4", "Claude-3"], "message": "Listing models stubbed"}
+# --- Serve Frontend (public) ---
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 
-# Example endpoint for running a benchmark
-@app.post("/benchmark/run")
-def run_benchmark():
-    return {"message": "Benchmark run initiated stubbed", "status": "processing"}
+
+@app.get("/")
+async def serve_frontend():
+    """Serve the main frontend page — no auth required."""
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Frontend not built. Run the build step."},
+    )
+
+
+# Mount static files for JS/CSS/assets
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
 
 if __name__ == "__main__":
     import uvicorn
