@@ -8,7 +8,8 @@ ENV PYTHONUNBUFFERED 1
 
 # Install dependencies (FastAPI, SQLAlchemy, uvicorn, etc.)
 WORKDIR /app
-COPY ./backend/requirements.txt . # Assuming a requirements.txt exists for backend dependencies
+
+COPY ./backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
@@ -18,6 +19,4 @@ COPY ./backend /app/backend
 EXPOSE 80
 
 # Command to run the FastAPI application using Uvicorn
-# Note: In a real production scenario, you would likely use a reverse proxy like Nginx 
-# or run both frontend and backend in separate containers.
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "80"]
