@@ -1,90 +1,40 @@
-# LLM Benchmark CT — Quick Reference
+# LLM Benchmark Container (llama.bench + prompt.foo)
 
-## What This Is
+This repository contains the benchmark container (“llama-benchmark.ct”) used to
+run deterministic, empirical performance tests across multiple AI-engine
+containers (HLH and PLH). It integrates:
 
-A containerized benchmarking tool for comparing LLM endpoints (OpenAI, llama.cpp, vLLM, LiteLLM, llama-swap).
+- llama.bench (remote execution on HLH/PLH)
+- prompt.foo (local clone inside benchmark CT)
+- FastAPI + HTMX landing page at http://192.168.1.4
+- SQLite-backed run history + comparison UI
+- Multi-phase agentic workflow driven by Pi-Agent or similar deterministic agent
 
-Configure endpoints, select models, run prompts, and track metrics (latency, tokens, throughput) across runs.
+The benchmark container does **not** host models. Models live on:
 
-## Access
+- `/srv/ai/models` on HLH-AI-Engine
+- `/srv/ai/models` on PLH-AI-Engine
 
-- **Web UI:** http://192.168.1.4/
-- **Health check:** http://192.168.1.4/health
-- **API docs (with auth):** http://192.168.1.4/docs
+The benchmark CT mounts these directories read-only.
 
-## API Authentication
+## Architecture Summary
 
-All API routes require `X-API-KEY` header (except `/health` and `/static/*`).
+- **llama.bench**  
+  Executed remotely via SSH on HLH and PLH at:
+  `/opt/llama.cpp/build/bin/llama-bench`
 
-```bash
-# Health check (no auth)
-curl http://192.168.1.4/health
+- **prompt.foo**  
+  Cloned into benchmark CT. Python scripts orchestrate prompt tests against
+  llama.cpp servers running on HLH/PLH at `/v1`.
 
-# API (with auth)
-curl -H "X-API-KEY: YOUR_KEY" http://192.168.1.4/endpoints/list
-```
+- **Landing Page**  
+  FastAPI + HTMX UI served from benchmark CT at:
+  `http://192.168.1.4`
 
-The API key is set via the `API_KEY` environment variable in docker-compose.yml.
+- **Data Store**  
+  SQLite database inside benchmark CT, backed by a persistent volume.
 
-## Key API Routes
+## Agentic Workflow
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check (no auth) |
-| GET | `/endpoints/list` | List configured endpoints |
-| POST | `/endpoints/save` | Add/update an endpoint |
-| DELETE | `/endpoints/{id}` | Delete an endpoint |
-| GET | `/endpoints/models/list` | List available models |
-| GET | `/presets/list` | List prompt presets |
-| POST | `/presets/save` | Save a prompt preset |
-| POST | `/benchmark/run` | Run a benchmark |
-| GET | `/analytics/history/filter` | Query benchmark history |
-| GET | `/analytics/run/{run_id}` | Get a single run |
-| GET | `/analytics/compare/run` | Comparison stats for a model |
-| GET | `/analytics/compare/trends` | Latency trends over time |
+Development and execution follow a deterministic multi-phase workflow defined in:
 
-## Volumes
-
-| Mount | Purpose |
-|-------|---------|
-| `/opt/ct/llm-benchmark/db/` | SQLite database (benchmark history, configs) |
-| `/opt/ct/llm-benchmark/configs/` | Endpoint configuration files |
-
-## Deploy
-
-```bash
-cd /root/git/llm-benchmark-ct
-bash deploy-llm-benchmark-ct.sh
-```
-
-## File Structure
-
-```
-llm-benchmark-ct/
-├── 00_BACKLOG.md          # Future tasks
-├── 10_ACTIVE.md           # Current work
-├── 90_DONE.md             # Completed milestones
-├── 98_README.md           # This file
-├── CHANGELOG.md           # Version history
-├── README.md              # Full documentation
-├── Dockerfile
-├── docker-compose.yml
-├── deploy-llm-benchmark-ct.sh
-├── backend/
-│   ├── main.py            # FastAPI app entry
-│   ├── auth.py            # API key authentication
-│   ├── db.py              # SQLite initialization + CRUD
-│   ├── models.py          # Data classes
-│   ├── schemas.py         # Pydantic schemas
-│   ├── endpoints.py       # API route definitions
-│   ├── benchmark.py       # Benchmark execution engine
-│   ├── openai_compat.py   # LLM adapter abstractions
-│   └── requirements.txt
-├── frontend/
-│   └── dist/              # Built SPA (HTML/CSS/JS)
-│       ├── index.html
-│       └── app.js
-└── volumes/
-    ├── db/                # SQLite data
-    └── configs/           # Endpoint configs
-```
