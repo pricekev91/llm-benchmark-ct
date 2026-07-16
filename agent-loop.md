@@ -128,35 +128,91 @@ PHASE 1 — Remote llama.bench Integration
 Implement remote execution of llama.bench on HLH and PLH AI-engine containers.
 
 ## Tasks
-- Implement SSH execution in `scripts/remote_llama_bench.py`.
-- Hardcode remote paths:
-  `/opt/llama.cpp/build/bin/llama-bench`
-- Add configuration file:
-  `config/engines.json`
-  containing:
-  - HLH hostname/IP
-  - PLH hostname/IP
-  - SSH user
-  - SSH key path
-- Implement function to:
-  - Execute llama.bench remotely
+- Implement SSH execution in `scripts/remote_llama_bench.py` using `paramiko`.
+- Configuration file `config/engines.json` must contain real values:
+  - `HLH` → host: `hlh-ai-engine`, SSH user: `root`, SSH key: `/root/.ssh/id_ed25519`
+  - `PLH` → host: `plh-ai-engine`, SSH user: `root`, SSH key: `/root/.ssh/id_ed25519`
+  - `llama_bench_path`: `/opt/llama.cpp/build/bin/llama-bench`
+- Models are located in directories on each engine container.
+  Implement a model discovery function that lists available GGUF files.
+  The function must accept a `model` parameter so the caller can select.
+- Implement `run_remote_bench(engine: str, model: str) -> dict`:
+  - Connect via SSH (key-based, `paramiko`, with 2 retries on failure)
+  - Execute `llama-bench` with reasonable defaults:
+    `-m <model_path> -t 4 -n 512 -ngl 99 -p 512 -n 128 -b 1`
   - Capture stdout
-  - Parse tok/s
-  - Return structured JSON
+  - Parse the output to extract: `tok/s`, context size, prompt tokens, generated tokens
+  - Return structured JSON (see schema below)
+  - Handle errors deterministically: SSH failure → raise; parse failure → raise; both engines must succeed
+- If one engine fails, the entire phase fails (both HLH and PLH must succeed).
 
 ## Expected Artifacts
-- Remote execution works for both HLH and PLH
-- tok/s parsed correctly
-- Errors handled deterministically
+- SSH key-based connectivity to both `hlh-ai-engine` and `plh-ai-engine`
+- `run_remote_bench()` returns valid JSON for both engines with `tok_s > 0`
+- Model discovery lists available GGUF files
+- llama-bench output parsed correctly
+- 2-retry logic for SSH failures
 
-## Validation
+**Return schema (`run_remote_bench`):**
+```json
+{
+  "engine": "HLH",
+  "model": "<model_name>",
+  "model_path": "/srv/ai/models/<model_name>",
+  "tok_s": 123.45,
+  "context_size": 512,
+  "prompt_tokens": 512,
+  "generated_tokens": 128,
+  "timestamp": "2026-07-15T12:00:00Z"
+}
+```
+
+## Validation (Concrete Test Suite)
+**Agent MUST run every test below and produce the validation JSON.** All tests must pass. Any failure stops execution.
+
+| # | Test Name | Command / Action | Pass Criteria |
+|---|-----------|------------------|---------------|
+| 1 | SSH key exists | `test -f /root/.ssh/id_ed25519` | File exists |
+| 2 | SSH key permissions | `stat -c '%a' /root/.ssh/id_ed25519` | Returns `600` |
+| 3 | SSH to HLH | `ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@hlh-ai-engine echo ok` | Returns `ok` |
+| 4 | SSH to PLH | `ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@plh-ai-engine echo ok` | Returns `ok` |
+| 5 | llama-bench binary exists (HLH) | `ssh root@hlh-ai-engine test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
+| 6 | llama-bench binary exists (PLH) | `ssh root@plh-ai-engine test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
+| 7 | Model discovery (HLH) | `ssh root@hlh-ai-engine find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
+| 8 | Model discovery (PLH) | `ssh root@plh-ai-engine find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
+| 9 | Remote bench — HLH | `python3 scripts/remote_llama_bench.py --engine HLH --model <first_model_found>` | Returns JSON with `tok_s > 0` |
+| 10 | Remote bench — PLH | `python3 scripts/remote_llama_bench.py --engine PLH --model <first_model_found>` | Returns JSON with `tok_s > 0` |
+| 11 | JSON schema validation | Parse output from tests 9+10 — verify all required keys present | All schema keys present, `tok_s` is numeric > 0 |
+| 12 | Retry logic | Intentionally break SSH for one test → verify retry succeeds on second attempt | Retry logic triggers and succeeds |
+
+### Pass/Fail Rule
+- All 12 tests must pass.
+- Agent records each test result (PASS/FAIL) in the validation JSON below.
+- **Any FAIL = Phase 1 NOT complete. STOP.**
+
+## Validation (Agent MUST produce this JSON)
 {
   "phase": "1",
   "goal": "remote llama.bench execution operational",
-  "check": "running remote_llama_bench.py returns JSON with tok_s > 0 for both HLH and PLH"
+  "tests": {
+    "test_01_ssh_key_exists": "PASS or FAIL",
+    "test_02_ssh_key_permissions": "PASS or FAIL",
+    "test_03_ssh_hlh": "PASS or FAIL",
+    "test_04_ssh_plh": "PASS or FAIL",
+    "test_05_llama_bench_hlh": "PASS or FAIL",
+    "test_06_llama_bench_plh": "PASS or FAIL",
+    "test_07_model_discovery_hlh": "PASS or FAIL",
+    "test_08_model_discovery_plh": "PASS or FAIL",
+    "test_09_bench_hlh": "PASS or FAIL",
+    "test_10_bench_plh": "PASS or FAIL",
+    "test_11_json_schema": "PASS or FAIL",
+    "test_12_retry_logic": "PASS or FAIL"
+  },
+  "all_pass": true or false,
+  "notes": "Any additional observations or failures"
 }
 
-STOP. Do not proceed to Phase 2 until validation passes.
+STOP. Do not proceed to Phase 2 until `all_pass` is `true` and all 12 tests show PASS.
 
 
 =====================================================================
