@@ -1,0 +1,5 @@
+-- Placeholder table
+CREATE TABLE IF NOT EXISTS placeholder (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

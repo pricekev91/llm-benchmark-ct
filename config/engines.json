@@ -1,0 +1,16 @@
+{
+  "engines": {
+    "HLH": {
+      "hostname": "<placeholder>",
+      "ssh_user": "root",
+      "ssh_key": "<placeholder>",
+      "llama_bench_path": "/opt/llama.cpp/build/bin/llama-bench"
+    },
+    "PLH": {
+      "hostname": "<placeholder>",
+      "ssh_user": "root",
+      "ssh_key": "<placeholder>",
+      "llama_bench_path": "/opt/llama.cpp/build/bin/llama-bench"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+services:
+  llm-benchmark-ct:
+    container_name: llm-benchmark-ct
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - /opt/ct/llm-benchmark/db:/app/db
+      - /opt/ct/llm-benchmark/configs:/app/config
+    restart: unless-stopped
+    networks:
+      macvlan:
+        ipv4_address: 192.168.1.4
+
+networks:
+  macvlan:
+    external: true
