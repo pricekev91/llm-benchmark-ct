@@ -28,3 +28,15 @@
 - HLH llama-server API working from container via macvlan
 - Dark-themed responsive UI with HTMX partial responses
 - Engine/model selection forms for both bench and prompt tests
+
+## Phase 4 — SQLite Storage + Comparison UI ✅ PASS
+- All 6/6 tests passed
+- SQLite schema: `bench_runs` and `prompt_runs` tables with indexes
+- Insert functions store all benchmark and prompt results
+- Comparison page at `/comparison` shows:
+  - Benchmark tok/s comparison across engines/models
+  - Prompt latency comparison across engines/models
+  - Detailed bench metrics (avg eval time, prompt time, run count)
+- Results page at `/results` shows run history with filters
+- All data persisted in `/app/db/benchmark.db`
+- Deployed on 192.168.1.4 container (macvlan)
