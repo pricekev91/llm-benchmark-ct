@@ -15,6 +15,94 @@ phase until the JSON validation check passes.
 Agents MUST NOT modify architecture or assumptions defined here.
 
 =====================================================================
+INFRASTRUCTURE — Hosts, Networks & Access
+=====================================================================
+
+## Host Inventory
+
+| # | Host Name | Role | Access Method | IP | Details |
+|---|-----------|------|---------------|-----|---------|
+| 1 | `alienwarem17r2` | Laptop (workstation) | Local root shell | N/A | Proxmox/LXD host, runs `lxc exec` commands |
+| 2 | `hlh-ai-engine` | HLH AI Engine | SSH root @ 192.168.1.12 | 192.168.1.12 | Ubuntu 24.04, 23 GGUF models (4.3T RAIDZ1), llama-bench at `/opt/llama.cpp/build/bin/llama-bench` |
+| 3 | `plh-ai-engine` | PLH AI Engine | LXC exec on laptop | 10.126.64.45 | Ubuntu 24.04, 16 GGUF models (1.9T NVMe), 15 GB RAM, 12 cores |
+| 4 | `hlh-docker` | HLH Docker Host | SSH root | 192.168.1.13 | Runs `llm-benchmark-ct` container on macvlan network |
+| 5 | `llm-benchmark-ct` | Benchmark Container (on hlh-docker) | Docker exec / HTTP | 192.168.1.4 | Debian 13 (trixie), FastAPI on port 80, 4 cores, macvlan network |
+
+## Network Topology
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        alienwarem17r2 (laptop)                       │
+│                        ┌──────────────────┐                          │
+│                        │  LXD / Proxmox   │  lxc exec                │
+│                        │  (project: prod) │──────► plh-ai-engine     │
+│                        │                  │      10.126.64.45        │
+│                        └──────────────────┘      (12 cores, 15 GB)   │
+│                                                                  │
+│         ssh root@192.168.1.12              │                     │
+│                     ╲                      │                     │
+│                      ╲                     │                     │
+└───────────────────────╲────────────────────┼─────────────────────────────────────────┐
+                          ╲                   │                                         │
+                           ╲                  │                                         │
+┌───────────────────────────╲─────────────────╲─────────────────────────────────────────╲───────────────────────────────┐
+│                           │                   │                                         │                         │
+│  192.168.1.0/24 (macvlan) │                   │  10.126.64.0/24 (LXD bridge)            │  SSH key: ~/.ssh/id_ed25519│
+│                           │                   │                                         │  public key added to:     │
+│  hlh-ai-engine            │                   │  plh-ai-engine                          │  - 192.168.1.12 (hlh)     │
+│  192.168.1.12             │                   │  10.126.64.45                           │  - 10.126.64.45 (plh)     │
+│  23 models, 4.3T RAID     │                   │  16 models, 1.9T NVMe                   │                         │
+│  /opt/llama.cpp/...       │                   │                                         │                         │
+│                           │                   │                                         │                         │
+│  hlh-docker ──────────►   │                   │                                         │                         │
+│  192.168.1.13             │                   │                                         │                         │
+│  ┌──────────────────┐    │                   │                                         │                         │
+│  │ llm-benchmark-ct │    │                   │                                         │                         │
+│  │ 192.168.1.4:80   │◄───┘                   │                                         │                         │
+│  │ Debian 13, FastAPI│                        │                                         │                         │
+│  └──────────────────┘                        │                                         │                         │
+└───────────────────────────────────────────────┴─────────────────────────────────────────┴───────────────────────────────┘
+```
+
+## Key Paths
+
+| Resource | Path |
+|----------|------|
+| SSH private key | `~/.ssh/id_ed25519` |
+| SSH public key | `~/.ssh/id_ed25519.pub` |
+| HLH llama-bench binary | `/opt/llama.cpp/build/bin/llama-bench` |
+| HLH models | `/srv/ai/models/` (23 GGUF files) |
+| PLH models | `/srv/ai/models/` (16 GGUF files) |
+| Benchmark config | `config/engines.json` (on container) |
+| Benchmark DB | `/app/db/` (on container, mounted from host) |
+
+## SSH Access Commands
+
+```bash
+# HLH (via SSH to 192.168.1.12)
+ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@192.168.1.12
+
+# PLH (via LXC exec from laptop)
+lxc exec plh-ai-engine --project prod -- bash
+
+# Benchmark container (on hlh-docker)
+ssh root@192.168.1.13
+docker exec -it llm-benchmark-ct bash
+```
+
+## Macvlan Network Members (192.168.1.0/24)
+
+| Host | IP | Purpose |
+|------|----|---------|
+| keycloak | 192.168.1.3 | Auth service |
+| llm-benchmark-ct | 192.168.1.4 | **This benchmark app** |
+| litellm | 192.168.1.14 | LiteLLM proxy |
+| open_notebook | 192.168.1.15 | Open Notebook |
+| openspeedtest | 192.168.1.19 | Speed test |
+| hlh-ai-engine | 192.168.1.12 | **HLH AI Engine** (separate host, reachable via SSH) |
+| hlh-docker | 192.168.1.13 | **HLH Docker host** (runs benchmark container) |
+
+=====================================================================
 PHASE 0 — Repository + Container Skeleton
 =====================================================================
 
@@ -130,9 +218,11 @@ Implement remote execution of llama.bench on HLH and PLH AI-engine containers.
 ## Tasks
 - Implement SSH execution in `scripts/remote_llama_bench.py` using `paramiko`.
 - Configuration file `config/engines.json` must contain real values:
-  - `HLH` → host: `hlh-ai-engine`, SSH user: `root`, SSH key: `/root/.ssh/id_ed25519`
-  - `PLH` → host: `plh-ai-engine`, SSH user: `root`, SSH key: `/root/.ssh/id_ed25519`
+  - `HLH` → host: `192.168.1.12`, SSH user: `root`, SSH key: `~/.ssh/id_ed25519`
+  - `PLH` → host: `10.126.64.45`, SSH user: `root`, SSH key: `~/.ssh/id_ed25519`
   - `llama_bench_path`: `/opt/llama.cpp/build/bin/llama-bench`
+- PLH is accessed via `lxc exec plh-ai-engine --project prod -- bash` on laptop (alienwarem17r2).
+- HLH is accessed via `ssh root@192.168.1.12` from any host with SSH key.
 - Models are located in directories on each engine container.
   Implement a model discovery function that lists available GGUF files.
   The function must accept a `model` parameter so the caller can select.
@@ -172,18 +262,18 @@ Implement remote execution of llama.bench on HLH and PLH AI-engine containers.
 
 | # | Test Name | Command / Action | Pass Criteria |
 |---|-----------|------------------|---------------|
-| 1 | SSH key exists | `test -f /root/.ssh/id_ed25519` | File exists |
-| 2 | SSH key permissions | `stat -c '%a' /root/.ssh/id_ed25519` | Returns `600` |
-| 3 | SSH to HLH | `ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@hlh-ai-engine echo ok` | Returns `ok` |
-| 4 | SSH to PLH | `ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@plh-ai-engine echo ok` | Returns `ok` |
-| 5 | llama-bench binary exists (HLH) | `ssh root@hlh-ai-engine test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
-| 6 | llama-bench binary exists (PLH) | `ssh root@plh-ai-engine test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
-| 7 | Model discovery (HLH) | `ssh root@hlh-ai-engine find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
-| 8 | Model discovery (PLH) | `ssh root@plh-ai-engine find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
-| 9 | Remote bench — HLH | `python3 scripts/remote_llama_bench.py --engine HLH --model <first_model_found>` | Returns JSON with `tok_s > 0` |
-| 10 | Remote bench — PLH | `python3 scripts/remote_llama_bench.py --engine PLH --model <first_model_found>` | Returns JSON with `tok_s > 0` |
+| 1 | SSH key exists | `test -f ~/.ssh/id_ed25519` | File exists |
+| 2 | SSH key permissions | `stat -c '%a' ~/.ssh/id_ed25519` | Returns `600` |
+| 3 | SSH to HLH (192.168.1.12) | `ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@192.168.1.12 echo ok` | Returns `ok` |
+| 4 | LXC to PLH (10.126.64.45) | `lxc exec plh-ai-engine --project prod -- echo ok` | Returns `ok` |
+| 5 | llama-bench binary exists (HLH) | `ssh -i ~/.ssh/id_ed25519 root@192.168.1.12 test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
+| 6 | llama-bench binary exists (PLH) | `lxc exec plh-ai-engine --project prod -- test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
+| 7 | Model discovery (HLH) | `ssh -i ~/.ssh/id_ed25519 root@192.168.1.12 find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
+| 8 | Model discovery (PLH) | `lxc exec plh-ai-engine --project prod -- find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
+| 9 | Remote bench — HLH | `python3 scripts/remote_llama_bench.py --engine HLH --model <first_model>` | Returns JSON with `tok_s > 0` |
+| 10 | Remote bench — PLH | `python3 scripts/remote_llama_bench.py --engine PLH --model <first_model>` | Returns JSON with `tok_s > 0` |
 | 11 | JSON schema validation | Parse output from tests 9+10 — verify all required keys present | All schema keys present, `tok_s` is numeric > 0 |
-| 12 | Retry logic | Intentionally break SSH for one test → verify retry succeeds on second attempt | Retry logic triggers and succeeds |
+| 12 | Retry logic | Simulate SSH timeout → verify retry triggers and succeeds | Retry logic triggers and succeeds |
 
 ### Pass/Fail Rule
 - All 12 tests must pass.
