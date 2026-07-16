@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}LLM Benchmark — Landing{% endblock %}
+
+{% block content %}
+<div class="grid">
+    <!-- Benchmark Form -->
+    <div class="card">
+        <h2>⚡ Benchmark Run</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+            Run llama-bench against a model and measure tokens/second.
+        </p>
+        <form hx-post="/run-bench" hx-target="#bench-result" hx-swap="innerHTML" hx-indicator="#bench-result">
+            <div class="form-group">
+                <label for="bench-engine">Engine</label>
+                <select id="bench-engine" name="engine" onchange="updateModelOptions('bench', this.value)">
+                    <option value="HLH" selected>HLH (192.168.1.12)</option>
+                    <option value="PLH">PLH (10.126.64.45)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="bench-model">Model</label>
+                <select id="bench-model" name="model">
+                    {% for m in models_hlh %}
+                    <option value="{{ m.id }}">{{ m.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="bench-tokens">Max Tokens</label>
+                <input type="number" id="bench-tokens" name="max_tokens" value="128" min="1" max="1024">
+            </div>
+            <button type="submit" class="btn btn-primary" id="bench-submit">
+                🚀 Run Benchmark
+            </button>
+        </form>
+        <div id="bench-result" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Prompt Test Form -->
+    <div class="card">
+        <h2>💬 Prompt Test</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+            Send a prompt and measure latency, output tokens, and response quality.
+        </p>
+        <form hx-post="/run-prompt" hx-target="#prompt-result" hx-swap="innerHTML" hx-indicator="#prompt-result">
+            <div class="form-group">
+                <label for="prompt-engine">Engine</label>
+                <select id="prompt-engine" name="engine" onchange="updateModelOptions('prompt', this.value)">
+                    <option value="HLH" selected>HLH (192.168.1.12)</option>
+                    <option value="PLH">PLH (10.126.64.45)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="prompt-model">Model</label>
+                <select id="prompt-model" name="model">
+                    {% for m in models_hlh %}
+                    <option value="{{ m.id }}">{{ m.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="prompt-text">Prompt</label>
+                <textarea id="prompt-text" name="prompt" rows="3"
+                    placeholder="Enter your test prompt here...">Write a concise 2-sentence summary of the history of artificial intelligence.</textarea>
+            </div>
+            <div class="form-group">
+                <label for="prompt-tokens">Max Tokens</label>
+                <input type="number" id="prompt-tokens" name="max_tokens" value="128" min="1" max="4096">
+            </div>
+            <button type="submit" class="btn btn-primary" id="prompt-submit">
+                📝 Run Prompt Test
+            </button>
+        </form>
+        <div id="prompt-result" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+<!-- Recent Results -->
+{% if bench_runs or prompt_runs %}
+<div class="card" style="margin-top: 1.5rem;">
+    <h2>📊 Recent Runs</h2>
+    {% if bench_runs %}
+    <h3 style="margin-top: 1rem;">Benchmarks</h3>
+    <div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Engine</th><th>Model</th><th>tok/s</th><th>Latency</th><th>Tokens</th><th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in bench_runs[:5] %}
+            <tr>
+                <td><span class="badge badge-{{ run.engine|lower }}">{{ run.engine }}</span></td>
+                <td>{{ run.model }}</td>
+                <td>{{ "%.1f"|format(run.tok_s) }}</td>
+                <td>{{ "%.0f"|format(run.latency_ms) }}ms</td>
+                <td>{{ run.generated_tokens }}</td>
+                <td>{{ run.timestamp[:19] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    {% if prompt_runs %}
+    <h3 style="margin-top: 1rem;">Prompt Tests</h3>
+    <div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Engine</th><th>Model</th><th>Latency</th><th>Output Tokens</th><th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in prompt_runs[:5] %}
+            <tr>
+                <td><span class="badge badge-{{ run.engine|lower }}">{{ run.engine }}</span></td>
+                <td>{{ run.model_name }}</td>
+                <td>{{ "%.0f"|format(run.latency_ms) }}ms</td>
+                <td>{{ run.output_tokens }}</td>
+                <td>{{ run.timestamp[:19] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block head %}
+<script>
+function updateModelOptions(formType, engine) {
+    const models = engine === 'PLH' ? {{ models_plh|tojson }} : {{ models_hlh|tojson }};
+    const selectId = formType + '-model';
+    const select = document.getElementById(selectId);
+    select.innerHTML = '';
+    models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        select.appendChild(opt);
+    });
+}
+</script>
+{% endblock %}

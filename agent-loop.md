@@ -76,10 +76,21 @@ INFRASTRUCTURE — Hosts, Networks & Access
 | Benchmark config | `config/engines.json` (on container) |
 | Benchmark DB | `/app/db/` (on container, mounted from host) |
 
+## ⚠️ HARD RULE — NEVER TOUCH HLH-AI-ENGINE ⚠️
+
+**DO NOT SSH TO, RUN COMMANDS ON, OR INTERACT WITH `hlh-ai-engine` (192.168.1.12) IN ANY WAY DURING AGENTIC TESTING.**
+
+- HLH-ai-engine runs the active LLM model (`llama-server`) that you are using to interact with.
+- Running ANY command on HLH-ai-engine (SSH, sudo, ps, find, llama-bench, curl) will kill the model process.
+- When the model process dies, the agent session dies. Everything breaks.
+- This has happened multiple times. **DO NOT DO IT AGAIN.**
+- ALL testing, benchmarking, validation MUST be done ONLY on PLH-ai-engine (10.126.64.45) via `lxc exec plh-ai-engine --project prod -- bash`.
+- HLH-ai-engine is for RUNNING the benchmark against, not for interacting with it.
+
 ## SSH Access Commands
 
 ```bash
-# HLH (via SSH to 192.168.1.12)
+# HLH (via SSH to 192.168.1.12) — READ ONLY, DO NOT RUN COMMANDS
 ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@192.168.1.12
 
 # PLH (via LXC exec from laptop)
@@ -236,6 +247,11 @@ Implement remote execution of llama.bench on HLH and PLH AI-engine containers.
   - Handle errors deterministically: SSH failure → raise; parse failure → raise; both engines must succeed
 - If one engine fails, the entire phase fails (both HLH and PLH must succeed).
 
+**⚠️ TESTING RULE: Only test on PLH-ai-engine. Never run commands on HLH-ai-engine during development/testing.**
+- Use `lxc exec plh-ai-engine --project prod -- bash` for ALL testing.
+- Do NOT SSH into 192.168.1.12 to run commands, check models, or benchmark.
+- HLH-ai-engine runs the live model — any interaction will kill it.
+
 ## Expected Artifacts
 - SSH key-based connectivity to both `hlh-ai-engine` and `plh-ai-engine`
 - `run_remote_bench()` returns valid JSON for both engines with `tok_s > 0`
@@ -260,23 +276,21 @@ Implement remote execution of llama.bench on HLH and PLH AI-engine containers.
 ## Validation (Concrete Test Suite)
 **Agent MUST run every test below and produce the validation JSON.** All tests must pass. Any failure stops execution.
 
+**⚠️ ALL tests below run on PLH-ai-engine ONLY. Never interact with HLH-ai-engine.**
+
 | # | Test Name | Command / Action | Pass Criteria |
 |---|-----------|------------------|---------------|
 | 1 | SSH key exists | `test -f ~/.ssh/id_ed25519` | File exists |
 | 2 | SSH key permissions | `stat -c '%a' ~/.ssh/id_ed25519` | Returns `600` |
-| 3 | SSH to HLH (192.168.1.12) | `ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@192.168.1.12 echo ok` | Returns `ok` |
-| 4 | LXC to PLH (10.126.64.45) | `lxc exec plh-ai-engine --project prod -- echo ok` | Returns `ok` |
-| 5 | llama-bench binary exists (HLH) | `ssh -i ~/.ssh/id_ed25519 root@192.168.1.12 test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
-| 6 | llama-bench binary exists (PLH) | `lxc exec plh-ai-engine --project prod -- test -f /opt/llama.cpp/build/bin/llama-bench` | Exit code 0 |
-| 7 | Model discovery (HLH) | `ssh -i ~/.ssh/id_ed25519 root@192.168.1.12 find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
-| 8 | Model discovery (PLH) | `lxc exec plh-ai-engine --project prod -- find /srv/ai/models -name '*.gguf' -type f 2>/dev/null` | Returns ≥ 1 model path |
-| 9 | Remote bench — HLH | `python3 scripts/remote_llama_bench.py --engine HLH --model <first_model>` | Returns JSON with `tok_s > 0` |
-| 10 | Remote bench — PLH | `python3 scripts/remote_llama_bench.py --engine PLH --model <first_model>` | Returns JSON with `tok_s > 0` |
-| 11 | JSON schema validation | Parse output from tests 9+10 — verify all required keys present | All schema keys present, `tok_s` is numeric > 0 |
-| 12 | Retry logic | Simulate SSH timeout → verify retry triggers and succeeds | Retry logic triggers and succeeds |
+| 3 | LXC to PLH | `lxc exec plh-ai-engine --project prod -- echo ok` | Returns `ok` |
+| 4 | llama-bench binary exists (PLH) | `lxc exec plh-ai-engine --project prod -- bash -c "test -f /opt/llama.cpp/build/bin/llama-bench"` | Exit code 0 |
+| 5 | Model discovery (PLH) | `lxc exec plh-ai-engine --project prod -- bash -c "find /srv/ai/models -name '*.gguf' -type f"` | Returns ≥ 1 model path |
+| 6 | Remote bench — PLH | `python3 scripts/remote_llama_bench.py --engine PLH --model <first_model>` | Returns JSON with `tok_s > 0` |
+| 7 | JSON schema validation | Parse output from test 6 — verify all required keys present | All schema keys present, `tok_s` is numeric > 0 |
+| 8 | Retry logic | Simulate SSH timeout → verify retry triggers and succeeds | Retry logic triggers and succeeds |
 
 ### Pass/Fail Rule
-- All 12 tests must pass.
+- All 8 tests must pass.
 - Agent records each test result (PASS/FAIL) in the validation JSON below.
 - **Any FAIL = Phase 1 NOT complete. STOP.**
 
@@ -287,22 +301,18 @@ Implement remote execution of llama.bench on HLH and PLH AI-engine containers.
   "tests": {
     "test_01_ssh_key_exists": "PASS or FAIL",
     "test_02_ssh_key_permissions": "PASS or FAIL",
-    "test_03_ssh_hlh": "PASS or FAIL",
-    "test_04_ssh_plh": "PASS or FAIL",
-    "test_05_llama_bench_hlh": "PASS or FAIL",
-    "test_06_llama_bench_plh": "PASS or FAIL",
-    "test_07_model_discovery_hlh": "PASS or FAIL",
-    "test_08_model_discovery_plh": "PASS or FAIL",
-    "test_09_bench_hlh": "PASS or FAIL",
-    "test_10_bench_plh": "PASS or FAIL",
-    "test_11_json_schema": "PASS or FAIL",
-    "test_12_retry_logic": "PASS or FAIL"
+    "test_03_lxc_plh": "PASS or FAIL",
+    "test_04_llama_bench_plh": "PASS or FAIL",
+    "test_05_model_discovery_plh": "PASS or FAIL",
+    "test_06_bench_plh": "PASS or FAIL",
+    "test_07_json_schema": "PASS or FAIL",
+    "test_08_retry_logic": "PASS or FAIL"
   },
   "all_pass": true or false,
   "notes": "Any additional observations or failures"
 }
 
-STOP. Do not proceed to Phase 2 until `all_pass` is `true` and all 12 tests show PASS.
+STOP. Do not proceed to Phase 2 until `all_pass` is `true` and all 8 tests show PASS.
 
 
 =====================================================================
@@ -332,14 +342,46 @@ llama.cpp servers.
   - model_name
   - engine_name
 
-## Validation
+## Validation (Concrete Test Suite)
+**Agent MUST run every test below and produce the validation JSON.** All tests must pass. Any failure stops execution.
+
+**⚠️ ALL tests below run on PLH-ai-engine ONLY. Never interact with HLH-ai-engine.**
+
+| # | Test Name | Command / Action | Pass Criteria |
+|---|-----------|------------------|---------------|
+| 1 | Script exists | `test -f scripts/run_prompt_test.py` | File exists |
+| 2 | Prompt test runs (PLH) | `python3 scripts/run_prompt_test.py --engine PLH --model gemma-4-E4B-it-Q4_K_M.gguf` | Returns JSON |
+| 3 | latency_ms > 0 | Parse JSON from test 2 — `latency_ms` key present and > 0 | latency_ms is numeric > 0 |
+| 4 | output_tokens > 0 | Parse JSON from test 2 — `output_tokens` key present and > 0 | output_tokens is numeric > 0 |
+| 5 | model_name present | Parse JSON from test 2 — `model_name` key present | model_name is non-empty string |
+| 6 | engine_name present | Parse JSON from test 2 — `engine_name` key present | engine_name is non-empty string |
+| 7 | Response text present | Parse JSON from test 2 — `response` key present and non-empty | response is non-empty string |
+| 8 | Multiple prompts | Run test 2 with different prompt text — verify results differ | Two runs return different response text |
+
+### Pass/Fail Rule
+- All 8 tests must pass.
+- Agent records each test result (PASS/FAIL) in the validation JSON below.
+- **Any FAIL = Phase 2 NOT complete. STOP.**
+
+## Validation (Agent MUST produce this JSON)
 {
   "phase": "2",
   "goal": "prompt.foo integration operational",
-  "check": "run_prompt_test.py returns JSON with latency_ms > 0 and output_tokens > 0"
+  "tests": {
+    "test_01_script_exists": "PASS or FAIL",
+    "test_02_prompt_test_runs": "PASS or FAIL",
+    "test_03_latency_ms": "PASS or FAIL",
+    "test_04_output_tokens": "PASS or FAIL",
+    "test_05_model_name": "PASS or FAIL",
+    "test_06_engine_name": "PASS or FAIL",
+    "test_07_response_text": "PASS or FAIL",
+    "test_08_multiple_prompts": "PASS or FAIL"
+  },
+  "all_pass": true or false,
+  "notes": "Any additional observations or failures"
 }
 
-STOP. Do not proceed to Phase 3 until validation passes.
+STOP. Do not proceed to Phase 3 until `all_pass` is `true` and all 8 tests show PASS.
 
 
 =====================================================================
@@ -366,14 +408,40 @@ Create FastAPI + HTMX landing page at http://192.168.1.4.
 - Forms submit correctly
 - Results display correctly
 
-## Validation
+## Validation (Concrete Test Suite)
+**Agent MUST run every test below and produce the validation JSON.** All tests must pass. Any failure stops execution.
+
+| # | Test Name | Command / Action | Pass Criteria |
+|---|-----------|------------------|---------------|
+| 1 | Landing page loads | `curl -s http://192.168.1.4/ | head -1` | Returns HTML (starts with `<` or `<!DOCTYPE`) |
+| 2 | Health endpoint | `curl -s http://192.168.1.4/health` | Returns `{"status":"ok"}` or equivalent JSON |
+| 3 | Run bench endpoint | `curl -s -X POST http://192.168.1.4/run-bench` | Returns JSON response (not error) |
+| 4 | Run prompt endpoint | `curl -s -X POST http://192.168.1.4/run-prompt` | Returns JSON response (not error) |
+| 5 | Results page loads | `curl -s http://192.168.1.4/results | head -1` | Returns HTML |
+| 6 | Form elements present | `curl -s http://192.168.1.4/ | grep -c -i 'engine\|model\|bench\|prompt'` | Returns ≥ 3 (form labels/elements found) |
+
+### Pass/Fail Rule
+- All 6 tests must pass.
+- Agent records each test result (PASS/FAIL) in the validation JSON below.
+- **Any FAIL = Phase 3 NOT complete. STOP.**
+
+## Validation (Agent MUST produce this JSON)
 {
   "phase": "3",
   "goal": "landing page operational",
-  "check": "GET / returns HTML; POST /run-bench triggers remote execution; POST /run-prompt triggers prompt.foo"
+  "tests": {
+    "test_01_landing_page": "PASS or FAIL",
+    "test_02_health_endpoint": "PASS or FAIL",
+    "test_03_run_bench": "PASS or FAIL",
+    "test_04_run_prompt": "PASS or FAIL",
+    "test_05_results_page": "PASS or FAIL",
+    "test_06_form_elements": "PASS or FAIL"
+  },
+  "all_pass": true or false,
+  "notes": "Any additional observations or failures"
 }
 
-STOP. Do not proceed to Phase 4 until validation passes.
+STOP. Do not proceed to Phase 4 until `all_pass` is `true` and all 6 tests show PASS.
 
 
 =====================================================================
@@ -398,14 +466,40 @@ Store benchmark and prompt results in SQLite and display comparisons.
 - Results stored in SQLite
 - Comparison UI displays aggregated metrics
 
-## Validation
+## Validation (Concrete Test Suite)
+**Agent MUST run every test below and produce the validation JSON.** All tests must pass. Any failure stops execution.
+
+| # | Test Name | Command / Action | Pass Criteria |
+|---|-----------|------------------|---------------|
+| 1 | Schema has bench_runs | `sqlite3 /app/db/benchmark.db "SELECT name FROM sqlite_master WHERE type='table' AND name='bench_runs';"` | Returns `bench_runs` |
+| 2 | Schema has prompt_runs | `sqlite3 /app/db/benchmark.db "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_runs';"` | Returns `prompt_runs` |
+| 3 | bench_runs has data | `curl -s -X POST http://192.168.1.4/run-bench > /dev/null && sqlite3 /app/db/benchmark.db "SELECT COUNT(*) FROM bench_runs;"` | Returns ≥ 1 |
+| 4 | prompt_runs has data | `curl -s -X POST http://192.168.1.4/run-prompt > /dev/null && sqlite3 /app/db/benchmark.db "SELECT COUNT(*) FROM prompt_runs;"` | Returns ≥ 1 |
+| 5 | Comparison page loads | `curl -s http://192.168.1.4/comparison | head -1` | Returns HTML |
+| 6 | Comparison shows data | `curl -s http://192.168.1.4/comparison | grep -ci -i 'tok/s\|latency\|engine\|model'` | Returns ≥ 1 |
+
+### Pass/Fail Rule
+- All 6 tests must pass.
+- Agent records each test result (PASS/FAIL) in the validation JSON below.
+- **Any FAIL = Phase 4 NOT complete. STOP.**
+
+## Validation (Agent MUST produce this JSON)
 {
   "phase": "4",
   "goal": "SQLite storage and comparison UI operational",
-  "check": "bench_runs and prompt_runs contain rows; comparison page loads aggregated metrics"
+  "tests": {
+    "test_01_schema_bench_runs": "PASS or FAIL",
+    "test_02_schema_prompt_runs": "PASS or FAIL",
+    "test_03_bench_runs_has_data": "PASS or FAIL",
+    "test_04_prompt_runs_has_data": "PASS or FAIL",
+    "test_05_comparison_page": "PASS or FAIL",
+    "test_06_comparison_shows_data": "PASS or FAIL"
+  },
+  "all_pass": true or false,
+  "notes": "Any additional observations or failures"
 }
 
-STOP. Do not proceed to Phase 5 until validation passes.
+STOP. Do not proceed to Phase 5 until `all_pass` is `true` and all 6 tests show PASS.
 
 
 =====================================================================
@@ -428,11 +522,37 @@ Implement deterministic agentic loop for Pi-Agent or similar.
 - Agent stops on failure
 - Agent resumes cleanly
 
-## Validation
+## Validation (Concrete Test Suite)
+**Agent MUST run every test below and produce the validation JSON.** All tests must pass. Any failure stops execution.
+
+| # | Test Name | Command / Action | Pass Criteria |
+|---|-----------|------------------|---------------|
+| 1 | validate_phase.py exists | `test -f scripts/validate_phase.py` | File exists |
+| 2 | validate_phase.py is executable | `python3 scripts/validate_phase.py --help` | Returns help text (exit 0) |
+| 3 | validate_phase.py phase 1 | `python3 scripts/validate_phase.py --phase 1` | Returns pass (exit 0) |
+| 4 | validate_phase.py phase 2 | `python3 scripts/validate_phase.py --phase 2` | Returns pass (exit 0) |
+| 5 | validate_phase.py all phases | `python3 scripts/validate_phase.py --all` | Returns pass for all phases (exit 0) |
+| 6 | resume.md exists | `test -f docs/resume.md` | File exists and is non-empty |
+
+### Pass/Fail Rule
+- All 6 tests must pass.
+- Agent records each test result (PASS/FAIL) in the validation JSON below.
+- **Any FAIL = Phase 5 NOT complete. STOP.**
+
+## Validation (Agent MUST produce this JSON)
 {
   "phase": "5",
   "goal": "agentic validation loop operational",
-  "check": "validate_phase.py returns pass for all phases when executed sequentially"
+  "tests": {
+    "test_01_validate_script_exists": "PASS or FAIL",
+    "test_02_validate_help": "PASS or FAIL",
+    "test_03_validate_phase1": "PASS or FAIL",
+    "test_04_validate_phase2": "PASS or FAIL",
+    "test_05_validate_all_phases": "PASS or FAIL",
+    "test_06_resume_md_exists": "PASS or FAIL"
+  },
+  "all_pass": true or false,
+  "notes": "Any additional observations or failures"
 }
 
 STOP. Workflow complete.

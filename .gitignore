@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+promptfoo/
+db/benchmark.db
+.env
+*.log

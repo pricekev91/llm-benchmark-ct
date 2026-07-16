@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}LLM Benchmark — Comparison{% endblock %}
+
+{% block content %}
+<div class="grid">
+    <!-- Benchmark Comparison -->
+    <div class="card">
+        <h2>⚡ Benchmark Comparison (tok/s)</h2>
+        {% if comparison.bench_comparison %}
+        <table>
+            <thead>
+                <tr><th>Engine</th><th>Model</th><th>Avg tok/s</th><th>Runs</th></tr>
+            </thead>
+            <tbody>
+                {% for r in comparison.bench_comparison %}
+                <tr>
+                    <td><span class="badge badge-{{ r.engine|lower }}">{{ r.engine }}</span></td>
+                    <td>{{ r.model }}</td>
+                    <td style="color: var(--warning); font-weight: 700;">{{ "%.1f"|format(r.avg_tok_s) }}</td>
+                    <td>{{ r.run_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: var(--text-muted);">No benchmark data yet.</p>
+        {% endif %}
+    </div>
+
+    <!-- Prompt Comparison -->
+    <div class="card">
+        <h2>💬 Prompt Test Comparison (tok/s)</h2>
+        {% if comparison.prompt_comparison %}
+        <table>
+            <thead>
+                <tr><th>Engine</th><th>Model</th><th>Avg tok/s</th><th>Avg Latency</th><th>Runs</th></tr>
+            </thead>
+            <tbody>
+                {% for r in comparison.prompt_comparison %}
+                <tr>
+                    <td><span class="badge badge-{{ r.engine|lower }}">{{ r.engine }}</span></td>
+                    <td>{{ r.model_name }}</td>
+                    <td style="color: var(--success); font-weight: 700;">{{ "%.1f"|format(r.avg_tps) }}</td>
+                    <td>{{ "%.0f"|format(r.avg_latency) }}ms</td>
+                    <td>{{ r.run_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: var(--text-muted);">No prompt data yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Detailed Bench Data -->
+{% if comparison.bench_comparison %}
+<div class="card" style="margin-top: 1.5rem;">
+    <h2>📈 Detailed Bench Metrics</h2>
+    <div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr><th>Engine</th><th>Model</th><th>Avg tok/s</th><th>Avg Eval (ms)</th><th>Avg Prompt (ms)</th><th>Runs</th></tr>
+        </thead>
+        <tbody>
+            {% for r in comparison.bench_comparison %}
+            <tr>
+                <td><span class="badge badge-{{ r.engine|lower }}">{{ r.engine }}</span></td>
+                <td>{{ r.model }}</td>
+                <td style="font-weight: 700;">{{ "%.1f"|format(r.avg_tok_s) }}</td>
+                <td>{{ "%.0f"|format(r.avg_latency) }}</td>
+                <td>—</td>
+                <td>{{ r.run_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

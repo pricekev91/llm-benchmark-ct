@@ -3,3 +3,5 @@ uvicorn
 paramiko
 aiosqlite
 htmx
+jinja2
+httpx

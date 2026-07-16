@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}LLM Benchmark — Results{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📊 Run History</h2>
+
+    <!-- Filters -->
+    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <a href="/results?type=all" class="btn btn-sm {{ 'btn-primary' if current_type == 'all' else '' }}">All</a>
+        <a href="/results?type=bench{% if current_engine %}&engine={{ current_engine }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if current_type == 'bench' else '' }}">Benchmarks</a>
+        <a href="/results?type=prompt{% if current_engine %}&engine={{ current_engine }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if current_type == 'prompt' else '' }}">Prompt Tests</a>
+        {% if current_engine %}
+        <a href="/results?type={{ current_type }}" class="btn btn-sm">Clear Filter</a>
+        {% endif %}
+    </div>
+
+    {% if runs %}
+    <div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Type</th><th>Engine</th><th>Model</th><th>Latency</th><th>Tokens</th><th>Tok/s</th><th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr>
+                <td>
+                    {% if run.get('tok_s') is not none %}
+                    <span style="color: var(--warning);">⚡ Bench</span>
+                    {% else %}
+                    <span style="color: var(--success);">💬 Prompt</span>
+                    {% endif %}
+                </td>
+                <td><span class="badge badge-{{ run.engine|lower }}">{{ run.engine }}</span></td>
+                <td>{{ run.get('model') or run.get('model_name') }}</td>
+                <td>{{ "%.0f"|format(run.latency_ms) }}ms</td>
+                <td>{{ run.get('generated_tokens') or run.get('output_tokens') or 0 }}</td>
+                <td>{{ "%.1f"|format(run.get('tok_s') or run.get('tokens_per_second') or 0) }}</td>
+                <td>{{ run.timestamp[:19] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted);">No runs yet. Go back and run a benchmark or prompt test.</p>
+    {% endif %}
+</div>
+{% endblock %}
