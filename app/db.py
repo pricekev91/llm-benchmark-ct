@@ -10,7 +10,8 @@ Provides:
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 # ---------------------------------------------------------------------------
@@ -20,6 +21,16 @@ from typing import Optional
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "db")
 DB_PATH = os.path.join(DB_DIR, "benchmark.db")
+
+
+def _format_timestamp() -> str:
+    """Return current timestamp in EST, 12-hour format with seconds: '2026-07-16 07:50:45 PM EDT'."""
+    try:
+        eastern = ZoneInfo("US/Eastern")
+    except Exception:
+        eastern = timezone(timedelta(hours=-5))
+    now = datetime.now(eastern)
+    return now.strftime("%Y-%m-%d %I:%M:%S %p %Z")
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +45,7 @@ CREATE TABLE IF NOT EXISTS bench_runs (
     model_path TEXT,
     tok_s REAL,
     context_size INTEGER,
+    mtp INTEGER DEFAULT 0,
     prompt_tokens INTEGER,
     generated_tokens INTEGER,
     eval_ms REAL,
@@ -56,6 +68,8 @@ CREATE TABLE IF NOT EXISTS prompt_runs (
     prompt_tokens INTEGER,
     total_tokens INTEGER,
     tokens_per_second REAL,
+    ctx_size INTEGER DEFAULT 8192,
+    mtp INTEGER DEFAULT 0,
     timestamp TEXT NOT NULL,
     raw_data TEXT  -- JSON dump of full result
 );
@@ -109,23 +123,24 @@ def insert_bench_run(result: dict) -> int:
     try:
         cursor = conn.execute(
             """INSERT INTO bench_runs
-               (engine, model, model_path, tok_s, context_size,
+               (engine, model, model_path, tok_s, context_size, mtp,
                 prompt_tokens, generated_tokens, eval_ms, prompt_eval_ms,
                 latency_ms, benchmark_source, timestamp, raw_data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 result.get("engine", ""),
                 result.get("model", ""),
                 result.get("model_path", ""),
                 result.get("tok_s", 0),
                 result.get("context_size", 0),
+                result.get("mtp", 0),
                 result.get("prompt_tokens", 0),
                 result.get("generated_tokens", 0),
                 result.get("eval_ms", 0),
                 result.get("prompt_eval_ms", 0),
                 result.get("latency_ms", 0),
                 result.get("benchmark_source", "api"),
-                result.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
+                result.get("timestamp", _format_timestamp()),
                 json.dumps(result),
             ),
         )
@@ -150,8 +165,8 @@ def insert_prompt_run(result: dict) -> int:
             """INSERT INTO prompt_runs
                (engine, model_name, model_path, prompt, response,
                 latency_ms, output_tokens, prompt_tokens, total_tokens,
-                tokens_per_second, timestamp, raw_data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                tokens_per_second, ctx_size, mtp, timestamp, raw_data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 result.get("engine", ""),
                 result.get("model_name", ""),
@@ -163,7 +178,9 @@ def insert_prompt_run(result: dict) -> int:
                 result.get("prompt_tokens", 0),
                 result.get("total_tokens", 0),
                 result.get("tokens_per_second", 0),
-                result.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
+                result.get("ctx_size", 8192),
+                result.get("mtp", 0),
+                result.get("timestamp", _format_timestamp()),
                 json.dumps(result),
             ),
         )

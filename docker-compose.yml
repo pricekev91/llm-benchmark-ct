@@ -7,6 +7,7 @@ services:
     volumes:
       - /opt/ct/llm-benchmark/db:/app/db
       - /opt/ct/llm-benchmark/configs:/app/config
+      - /home/pricekev/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
     restart: unless-stopped
     networks:
       macvlan:

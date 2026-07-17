@@ -22,9 +22,27 @@
                 <label for="bench-model">Model</label>
                 <select id="bench-model" name="model">
                     {% for m in models_hlh %}
-                    <option value="{{ m.id }}">{{ m.name }}</option>
+                    <option value="{{ m.id }}" data-quant="{{ m.quantization }}" data-mtp="{{ m.mtp }}" data-ctx="{{ m.context_size }}">{{ m.name }}</option>
                     {% endfor %}
                 </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="bench-ctx">Context Size</label>
+                    <select id="bench-ctx" name="ctx_size">
+                        {% for ctx in ctx_sizes %}
+                        <option value="{{ ctx }}" {% if ctx == 8192 %}selected{% endif %}>{{ ctx }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="bench-mtp">MTP</label>
+                    <select id="bench-mtp" name="mtp">
+                        {% for v in mtp_options %}
+                        <option value="{{ v }}" {% if v == 0 %}selected{% endif %}>{{ v }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
             </div>
             <div class="form-group">
                 <label for="bench-tokens">Max Tokens</label>
@@ -55,9 +73,27 @@
                 <label for="prompt-model">Model</label>
                 <select id="prompt-model" name="model">
                     {% for m in models_hlh %}
-                    <option value="{{ m.id }}">{{ m.name }}</option>
+                    <option value="{{ m.id }}" data-quant="{{ m.quantization }}" data-mtp="{{ m.mtp }}" data-ctx="{{ m.context_size }}">{{ m.name }}</option>
                     {% endfor %}
                 </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="prompt-ctx">Context Size</label>
+                    <select id="prompt-ctx" name="ctx_size">
+                        {% for ctx in ctx_sizes %}
+                        <option value="{{ ctx }}" {% if ctx == 8192 %}selected{% endif %}>{{ ctx }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="prompt-mtp">MTP</label>
+                    <select id="prompt-mtp" name="mtp">
+                        {% for v in mtp_options %}
+                        <option value="{{ v }}" {% if v == 0 %}selected{% endif %}>{{ v }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
             </div>
             <div class="form-group">
                 <label for="prompt-text">Prompt</label>
@@ -86,7 +122,7 @@
     <table>
         <thead>
             <tr>
-                <th>Engine</th><th>Model</th><th>tok/s</th><th>Latency</th><th>Tokens</th><th>Time</th>
+                <th>Engine</th><th>Model</th><th>tok/s</th><th>Ctx</th><th>MTP</th><th>Latency</th><th>Tokens</th><th>Time</th>
             </tr>
         </thead>
         <tbody>
@@ -95,9 +131,11 @@
                 <td><span class="badge badge-{{ run.engine|lower }}">{{ run.engine }}</span></td>
                 <td>{{ run.model }}</td>
                 <td>{{ "%.1f"|format(run.tok_s) }}</td>
+                <td>{{ run.context_size }}</td>
+                <td>{{ run.mtp if run.mtp is not none else '0' }}</td>
                 <td>{{ "%.0f"|format(run.latency_ms) }}ms</td>
                 <td>{{ run.generated_tokens }}</td>
-                <td>{{ run.timestamp[:19] }}</td>
+                <td>{{ run.timestamp|format_time }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -111,7 +149,7 @@
     <table>
         <thead>
             <tr>
-                <th>Engine</th><th>Model</th><th>Latency</th><th>Output Tokens</th><th>Time</th>
+                <th>Engine</th><th>Model</th><th>Ctx</th><th>MTP</th><th>Latency</th><th>Output Tokens</th><th>Time</th>
             </tr>
         </thead>
         <tbody>
@@ -119,9 +157,11 @@
             <tr>
                 <td><span class="badge badge-{{ run.engine|lower }}">{{ run.engine }}</span></td>
                 <td>{{ run.model_name }}</td>
+                <td>{{ run.ctx_size if run.ctx_size is not none else '8192' }}</td>
+                <td>{{ run.mtp if run.mtp is not none else '0' }}</td>
                 <td>{{ "%.0f"|format(run.latency_ms) }}ms</td>
                 <td>{{ run.output_tokens }}</td>
-                <td>{{ run.timestamp[:19] }}</td>
+                <td>{{ run.timestamp|format_time }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -133,18 +173,65 @@
 {% endblock %}
 
 {% block head %}
+<style>
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+</style>
 <script>
+// Model data from server (SSH filesystem scan for HLH, API fallback)
+const modelsData = {
+    HLH: {{ models_hlh|tojson }},
+    PLH: {{ models_plh|tojson }}
+};
+
 function updateModelOptions(formType, engine) {
-    const models = engine === 'PLH' ? {{ models_plh|tojson }} : {{ models_hlh|tojson }};
+    const models = modelsData[engine] || [];
     const selectId = formType + '-model';
     const select = document.getElementById(selectId);
+    const ctxId = formType + '-ctx';
+    const mtpId = formType + '-mtp';
+    const ctxSelect = ctxId ? document.getElementById(ctxId) : null;
+    const mtpSelect = mtpId ? document.getElementById(mtpId) : null;
+
     select.innerHTML = '';
+    if (models.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No models found — scan may be in progress';
+        select.appendChild(opt);
+        return;
+    }
+
     models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.id;
         opt.textContent = m.name;
+        if (m.context_size !== undefined) {
+            opt.dataset.ctx = m.context_size;
+        }
         select.appendChild(opt);
     });
+
+    // Auto-set ctx_size to the first model's detected context size
+    if (ctxSelect && models.length > 0) {
+        const suggestedCtx = models[0].context_size || 8192;
+        // Check if suggested ctx exists in dropdown, otherwise keep default
+        const options = Array.from(ctxSelect.options);
+        const found = options.find(o => parseInt(o.value) === suggestedCtx);
+        if (found) {
+            ctxSelect.value = suggestedCtx;
+        }
+    }
 }
+
+// Auto-select first model on page load
+document.addEventListener('DOMContentLoaded', () => {
+    // Default engine is HLH, models_hlh is pre-populated
+    updateModelOptions('bench', 'HLH');
+    updateModelOptions('prompt', 'HLH');
+});
 </script>
 {% endblock %}

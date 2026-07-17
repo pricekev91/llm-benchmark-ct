@@ -15,16 +15,45 @@ import json
 import os
 import traceback
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+
+def _format_time_for_display(timestamp: str) -> str:
+    """Format timestamp for display.
+
+    New format: '2026-07-16 07:50:45 PM EDT' → '07-16 07:50:45 PM'
+    Old ISO format: '2026-07-16T21:50:17' → '07-16 09:50:17 PM'
+    """
+    if "T" in str(timestamp):  # old ISO format
+        dt = datetime.fromisoformat(str(timestamp))
+        return dt.strftime("%m-%d %I:%M:%S %p")
+    else:  # already formatted
+        ts = str(timestamp)
+        # '2026-07-16 07:50:45 PM EDT'
+        parts = ts.split(" ")
+        date_part = parts[0]  # '2026-07-16'
+        date_formatted = date_part[5:]  # '07-16'
+        time_part = parts[1]  # '07:50:45'
+        ampm = parts[2]  # 'PM'
+        return f"{date_formatted} {time_part} {ampm}"
+
+
+def format_time_filter(timestamp: str) -> str:
+    """Jinja2 filter for formatted display timestamps."""
+    return _format_time_for_display(timestamp)
+
 from app import db as db_module
 from app.models import (
     SERVER_URLS,
+    CTX_SIZES,
+    MTP_OPTIONS,
     discover_models,
+    discover_models_ssh,
     get_model_path,
     run_bench_via_api,
     run_prompt_via_api,
@@ -39,6 +68,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(SCRIPT_DIR, "templates")
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
+templates.env.filters["format_time"] = format_time_filter
 
 # Runtime state
 _server_url_override: Optional[str] = None
@@ -97,9 +127,13 @@ async def health():
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request):
     """Landing page with model/engine selection forms."""
-    # Discover models from both engines
-    models_plh = discover_models("PLH")
-    models_hlh = discover_models("HLH")
+    # Discover models: SSH filesystem scan preferred (lists ALL GGUF files)
+    models_hlh = discover_models_ssh("HLH")
+    if not models_hlh:
+        models_hlh = discover_models("HLH")  # fallback to API
+    models_plh = discover_models_ssh("PLH")
+    if not models_plh:
+        models_plh = discover_models("PLH")  # fallback to API
 
     # Get recent results
     results = db_module.get_all_runs(limit=10)
@@ -111,6 +145,8 @@ async def landing(request: Request):
             "models_hlh": models_hlh,
             "bench_runs": results.get("bench_runs", []),
             "prompt_runs": results.get("prompt_runs", []),
+            "ctx_sizes": CTX_SIZES,
+            "mtp_options": MTP_OPTIONS,
         },
     )
 
@@ -159,11 +195,11 @@ async def comparison_page(request: Request):
 
 @app.get("/models")
 async def models_api(engine: Optional[str] = None):
-    """List available models."""
-    if engine:
-        models = discover_models(engine)
-    else:
-        models = discover_models("HLH")
+    """List available models (SSH filesystem scan preferred)."""
+    target = engine or "HLH"
+    models = discover_models_ssh(target)
+    if not models:
+        models = discover_models(target)
     return {"models": models}
 
 
@@ -177,12 +213,16 @@ async def run_bench(
     engine: str = Form(default="HLH"),
     model: str = Form(default=""),
     max_tokens: int = Form(default=128),
+    ctx_size: int = Form(default=8192),
+    mtp: int = Form(default=0),
 ):
     """Run benchmark and return JSON result."""
     try:
         # Determine model to benchmark
         if not model:
-            models = discover_models(engine, _get_server_url(engine))
+            models = discover_models_ssh(engine)
+            if not models:
+                models = discover_models(engine, _get_server_url(engine))
             if not models:
                 return JSONResponse(
                     status_code=200,
@@ -191,12 +231,14 @@ async def run_bench(
                         engine=engine,
                     ),
                 )
-            model = models[0]["name"]
+            model = models[0]["id"]
 
         result = run_bench_via_api(
             engine=engine,
             model=model,
             base_url=_get_server_url(engine),
+            ctx_size=ctx_size,
+            mtp=mtp,
         )
 
         # Store in DB
@@ -223,12 +265,16 @@ async def run_prompt(
         default="Write a concise 2-sentence summary of the history of artificial intelligence."
     ),
     max_tokens: int = Form(default=128),
+    ctx_size: int = Form(default=8192),
+    mtp: int = Form(default=0),
 ):
     """Run prompt test and return JSON result."""
     try:
         # Determine model
         if not model:
-            models = discover_models(engine, _get_server_url(engine))
+            models = discover_models_ssh(engine)
+            if not models:
+                models = discover_models(engine, _get_server_url(engine))
             if not models:
                 return JSONResponse(
                     status_code=200,
@@ -237,7 +283,7 @@ async def run_prompt(
                         engine=engine,
                     ),
                 )
-            model = models[0]["name"]
+            model = models[0]["id"]
 
         result = run_prompt_via_api(
             engine=engine,
@@ -245,6 +291,8 @@ async def run_prompt(
             prompt=prompt,
             max_tokens=max_tokens,
             base_url=_get_server_url(engine),
+            ctx_size=ctx_size,
+            mtp=mtp,
         )
 
         # Store in DB
@@ -268,22 +316,28 @@ async def run_bench_hxmx(
     engine: str = Form(default="HLH"),
     model: str = Form(default=""),
     max_tokens: int = Form(default=128),
+    ctx_size: int = Form(default=8192),
+    mtp: int = Form(default=0),
 ):
     """HTMX endpoint for benchmark — returns partial HTML."""
     try:
         if not model:
-            models = discover_models(engine, _get_server_url(engine))
+            models = discover_models_ssh(engine)
+            if not models:
+                models = discover_models(engine, _get_server_url(engine))
             if not models:
                 return templates.TemplateResponse(
                     request, "partials/error.html",
                     context={"error": f"No models found on {engine}"},
                 )
-            model = models[0]["name"]
+            model = models[0]["id"]
 
         result = run_bench_via_api(
             engine=engine,
             model=model,
             base_url=_get_server_url(engine),
+            ctx_size=ctx_size,
+            mtp=mtp,
         )
         db_module.insert_bench_run(result)
 
@@ -312,17 +366,21 @@ async def run_prompt_htmx(
         default="Write a concise 2-sentence summary of the history of artificial intelligence."
     ),
     max_tokens: int = Form(default=128),
+    ctx_size: int = Form(default=8192),
+    mtp: int = Form(default=0),
 ):
     """HTMX endpoint for prompt — returns partial HTML."""
     try:
         if not model:
-            models = discover_models(engine, _get_server_url(engine))
+            models = discover_models_ssh(engine)
+            if not models:
+                models = discover_models(engine, _get_server_url(engine))
             if not models:
                 return templates.TemplateResponse(
                     request, "partials/error.html",
                     context={"error": f"No models found on {engine}"},
                 )
-            model = models[0]["name"]
+            model = models[0]["id"]
 
         result = run_prompt_via_api(
             engine=engine,
@@ -330,6 +388,8 @@ async def run_prompt_htmx(
             prompt=prompt,
             max_tokens=max_tokens,
             base_url=_get_server_url(engine),
+            ctx_size=ctx_size,
+            mtp=mtp,
         )
         db_module.insert_prompt_run(result)
 
