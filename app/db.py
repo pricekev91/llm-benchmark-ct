@@ -1,4 +1,4 @@
-ome in """
+"""
 SQLite database module for llm-benchmark-ct.
 
 Provides:
