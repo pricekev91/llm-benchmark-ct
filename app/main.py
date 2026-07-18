@@ -120,6 +120,35 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/version")
+async def version():
+    """Version info endpoint."""
+    return {
+        "name": "LLM Benchmark Container",
+        "version": app.version,
+        "status": "ok",
+    }
+
+
+@app.post("/reload-config")
+async def reload_config():
+    """Reload configuration from config/engines.json at runtime."""
+    try:
+        db_module.reload_config()
+        return {
+            "status": "ok",
+            "message": "Configuration reloaded successfully",
+            "server_urls": dict(SERVER_URLS),
+            "ctx_sizes": CTX_SIZES,
+            "mtp_options": MTP_OPTIONS,
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
 # ---------------------------------------------------------------------------
 # Landing Page
 # ---------------------------------------------------------------------------
